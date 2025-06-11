@@ -1,0 +1,47 @@
+name: EC2 Deploy
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - deploy-dev
+      - deploy-prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: terraform
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -var-file="${{ github.ref_name == 'deploy-prod' && 'prod_config.tfvars' || 'dev_config.tfvars' }}"
+        working-directory: terraform
+
+      - name: Get EC2 IP
+        id: ec2
+        run: |
+          IP=$(terraform output -raw instance_ip)
+          echo "INSTANCE_IP=$IP" >> $GITHUB_ENV
+        working-directory: terraform
+
+      - name: Wait for app
+        run: |
+          for i in {1..10}; do
+            curl --connect-timeout 5 http://$INSTANCE_IP:80 && break
+            echo "Waiting for app..."
+            sleep 10
+          done
